@@ -81,7 +81,6 @@ const WORKING_ANIMATION_FRAMES: [char; 4] = ['▖', '▘', '▝', '▗'];
 enum Mode {
     Normal,
     Working,
-    EditTask,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -93,18 +92,21 @@ struct AppData {
 #[derive(Serialize, Deserialize, Debug)]
 struct Task {
     text: String,
-    minutes: i64,
+    seconds_estimated: i64,
+    seconds_spent: i64,
 }
 
 fn default_app_data() -> AppData {
     let tasks: Vec<Task> = vec![
         Task {
             text: String::from("Task 1"),
-            minutes: 30,
+            seconds_estimated: 30 * 60,
+            seconds_spent: 0,
         },
         Task {
             text: String::from("Task 2"),
-            minutes: 60,
+            seconds_estimated: 30 * 60,
+            seconds_spent: 0,
         }
     ];
     let app_data: AppData = AppData { tasks };
@@ -148,22 +150,23 @@ where
     Ok(())
 }
 
-fn render_tasks<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, start_time: &DateTime<Local>, animation_counter: usize, mode: &Mode) -> Result<()>
+fn render_tasks<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, start_working_time: &DateTime<Local>, animation_counter: usize, mode: &Mode) -> Result<()>
 where
     W: Write,
 {
     let (columns, rows) = terminal::size()?;
     let start_of_day = Local::today().and_hms(0, 0, 0);
 
-    let mut head = start_time.clone();
+    let mut eta = Local::now();
     for (i, task) in tasks.iter().enumerate() {
-        let duration = Duration::minutes(task.minutes);
-        head = head + duration;
+        let duration = Duration::seconds(task.seconds_estimated);
+        eta = eta + duration;
 
         let text = format!("{}", &task.text);
         let duration_str = format!("{}", (start_of_day + duration).format("%-H:%M"));
-        let target_str = format!("{}", head.format("%H:%M"));
+        let target_str = format!("{}", eta.format("%H:%M"));
 
+        // Draw bullet + name
         match mode {
             Mode::Normal => {
                 if i == selected_task_index {
@@ -187,6 +190,7 @@ where
                         w,
                         SetForegroundColor(Color::Green),
                         style::Print(WORKING_ANIMATION_FRAMES[animation_counter]),
+                        style::Print(" "),
                         style::Print(&text),
                     )?;
                 } else {
@@ -197,18 +201,108 @@ where
                     )?;
                 }
             }
-            Mode::EditTask => {
-            }
         }
 
+        // Draw seconds_estimated + eta
         queue!(
             w,
             SetForegroundColor(Color::DarkGrey),
             cursor::MoveToColumn(columns - (target_str.len() - 1) as u16),
             style::Print(&target_str),
             SetForegroundColor(Color::DarkGrey),
-            cursor::MoveToColumn(columns - 8 - (duration_str.len() - 1) as u16),
+            cursor::MoveToColumn(columns - 7 - (duration_str.len() - 1) as u16),
             style::Print(&duration_str),
+        )?;
+
+        match mode {
+            Mode::Working => {
+                if i == 0 {
+                    let spent_in_current_session = Local::now() - start_working_time.clone();
+                    let spent_seconds = Duration::seconds(task.seconds_spent) + spent_in_current_session;
+                    if spent_seconds.num_seconds() < task.seconds_estimated {
+                        let timer = start_of_day + Duration::seconds(task.seconds_estimated) - spent_seconds;
+                        let timer_str = format!("{}", timer.format("%-H:%M:%S"));
+                        queue!(
+                            w,
+                            cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
+                            SetForegroundColor(Color::Green),
+                            style::Print("+"),
+                            style::Print(&timer_str),
+                            style::ResetColor,
+                        )?;
+                    } else {
+                        let timer = start_of_day + (spent_seconds - Duration::seconds(task.seconds_estimated));
+                        let timer_str = format!("{}", timer.format("%-H:%M:%S"));
+                        queue!(
+                            w,
+                            cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
+                            SetForegroundColor(Color::Red),
+                            style::Print("-"),
+                            style::Print(&timer_str),
+                            style::ResetColor,
+                        )?;
+                    }
+                } else {
+                    if task.seconds_spent > 0 {
+                        let spent_seconds = Duration::seconds(task.seconds_spent);
+                        if spent_seconds.num_seconds() < task.seconds_estimated {
+                            let timer = start_of_day + Duration::seconds(task.seconds_estimated) - spent_seconds;
+                            let timer_str = format!("{}", timer.format("%-H:%M:%S"));
+                            queue!(
+                                w,
+                                cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
+                                SetForegroundColor(Color::Green),
+                                style::Print("+"),
+                                style::Print(&timer_str),
+                                style::ResetColor,
+                            )?;
+                        } else {
+                            let timer = start_of_day + (spent_seconds - Duration::seconds(task.seconds_estimated));
+                            let timer_str = format!("{}", timer.format("%-H:%M:%S"));
+                            queue!(
+                                w,
+                                cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
+                                SetForegroundColor(Color::Red),
+                                style::Print("-"),
+                                style::Print(&timer_str),
+                                style::ResetColor,
+                            )?;
+                        }
+                    }
+                }
+            }
+            _ => {
+                if task.seconds_spent > 0 {
+                    let spent_seconds = Duration::seconds(task.seconds_spent);
+                    if spent_seconds.num_seconds() < task.seconds_estimated {
+                        let timer = start_of_day + Duration::seconds(task.seconds_estimated) - spent_seconds;
+                        let timer_str = format!("{}", timer.format("%-H:%M:%S"));
+                        queue!(
+                            w,
+                            cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
+                            SetForegroundColor(Color::Green),
+                            style::Print("+"),
+                            style::Print(&timer_str),
+                            style::ResetColor,
+                        )?;
+                    } else {
+                        let timer = start_of_day + (spent_seconds - Duration::seconds(task.seconds_estimated));
+                        let timer_str = format!("{}", timer.format("%-H:%M:%S"));
+                        queue!(
+                            w,
+                            cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
+                            SetForegroundColor(Color::Red),
+                            style::Print("-"),
+                            style::Print(&timer_str),
+                            style::ResetColor,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        queue!(
+            w,
             style::ResetColor,
             cursor::MoveToNextLine(2)
         )?;
@@ -221,13 +315,17 @@ fn render_timer<W>(w: &mut W) -> Result<()>
 where
     W: Write,
 {
+    let (columns, rows) = terminal::size()?;
     let now = Local::now();
+    let now_str = format!("{}", now.format("%-H:%M"));
 
     queue!(
         w,
         SetForegroundColor(Color::Green),
-        style::Print(now.format("%H:%M:%S").to_string()),
-        style::ResetColor
+        cursor::MoveToColumn(columns - 0 - (now_str.len() - 1) as u16),
+        style::Print(&now_str),
+        style::ResetColor,
+        cursor::MoveToNextLine(2)
     )?;
 
     Ok(())
@@ -242,7 +340,6 @@ where
     let mode_str = match mode {
         Mode::Normal => "NORMAL",
         Mode::Working => "WORKING",
-        Mode::EditTask => "EDITING",
     };
 
     queue!(
@@ -254,7 +351,16 @@ where
     Ok(())
 }
 
-fn render<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, current_task_index: usize, mode: &Mode, start_time: &DateTime<Local>, animation_counter: usize) -> Result<()>
+fn edit_task<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize) -> Result<()>
+where
+    W: Write,
+{
+
+
+    Ok(())
+}
+
+fn render<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, mode: &Mode, start_working_time: &DateTime<Local>, animation_counter: usize) -> Result<()>
 where
     W: Write,
 {
@@ -265,9 +371,9 @@ where
         cursor::Hide,
         cursor::MoveTo(0, 1)
     )?;
-    render_current_task(w, &tasks[current_task_index])?;
-    render_tasks(w, &tasks, selected_task_index, start_time, animation_counter, mode)?;
+    // render_current_task(w, &tasks[0])?;
     render_timer(w)?;
+    render_tasks(w, &tasks, selected_task_index, start_working_time, animation_counter, mode)?;
     render_mode(w, mode)?;
     w.flush()?;
 
@@ -286,15 +392,14 @@ where
     let mut app_data: AppData = load_app_data();
 
     let mut mode: Mode = Mode::Normal;
-    let start_time = Local::now();
+    let mut start_working_time = Local::now();
 
-    let mut current_task_index: usize = 0;
     let mut selected_task_index: usize = 0;
     let mut animation_counter: usize = 0;
 
     execute!(w, terminal::EnterAlternateScreen)?;
     terminal::enable_raw_mode()?;
-    render(w, &app_data.tasks, selected_task_index, current_task_index, &mode, &start_time, animation_counter)?;
+    render(w, &app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
 
     loop {
         // Wait up to 1s for another event
@@ -309,23 +414,40 @@ where
                     }
                     if key_event.code == KeyCode::Enter {
                         match mode {
-                            Mode::Normal => { mode = Mode::Working }
-                            _ => { mode = Mode::Normal }
+                            Mode::Normal => {
+                                mode = Mode::Working;
+                                start_working_time = Local::now();
+                            }
+                            Mode::Working => {
+                                mode = Mode::Normal;
+                                let seconds_spent = Local::now() - start_working_time;
+                                app_data.tasks[0].seconds_spent += seconds_spent.num_seconds();
+                            }
                         }
                     }
                     if key_event.code == KeyCode::Esc {
                         mode = Mode::Normal;
                     }
                     if key_event.code == KeyCode::Char('J') {
-                        if selected_task_index + 1 < app_data.tasks.len() {
-                            app_data.tasks.swap(selected_task_index, selected_task_index + 1);
-                            selected_task_index = selected_task_index + 1;
+                        match mode {
+                            Mode::Normal => {
+                                if selected_task_index + 1 < app_data.tasks.len() {
+                                    app_data.tasks.swap(selected_task_index, selected_task_index + 1);
+                                    selected_task_index = selected_task_index + 1;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('K') {
-                        if selected_task_index != 0 {
-                            app_data.tasks.swap(selected_task_index, selected_task_index - 1);
-                            selected_task_index = selected_task_index - 1;
+                        match mode {
+                            Mode::Normal => {
+                                if selected_task_index != 0 {
+                                    app_data.tasks.swap(selected_task_index, selected_task_index - 1);
+                                    selected_task_index = selected_task_index - 1;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('j') {
@@ -349,34 +471,57 @@ where
                         }
                     }
                     if key_event.code == KeyCode::Char('+') || key_event.code == KeyCode::Char('=') {
-                        app_data.tasks[selected_task_index].minutes += 15;
+                        app_data.tasks[selected_task_index].seconds_estimated += 15 * 60;
                     }
-                    if key_event.code == KeyCode::Char('-') {
-                        app_data.tasks[selected_task_index].minutes = max(15, app_data.tasks[selected_task_index].minutes - 15);
+                    if key_event.code == KeyCode::Char('-') || key_event.code == KeyCode::Char('_') {
+                        app_data.tasks[selected_task_index].seconds_estimated = max(15 * 60, app_data.tasks[selected_task_index].seconds_estimated - 15 * 60);
                     }
                     if key_event.code == KeyCode::Char('n') {
-                        mode = Mode::EditTask;
-                        selected_task_index = app_data.tasks.len();
-                        app_data.tasks.push(Task {
-                            text: String::from(""),
-                            minutes: 15,
-                        });
+                        match mode {
+                            Mode::Normal => {
+                                selected_task_index = app_data.tasks.len();
+                                app_data.tasks.push(Task {
+                                    text: String::from(""),
+                                    seconds_estimated: 15 * 60,
+                                    seconds_spent: 0,
+                                });
+                                // TODO: edit task
+                            }
+                            _ => {}
+                        }
                     }
                     if key_event.code == KeyCode::Char('e') {
-                        mode = Mode::EditTask;
-                        let input = read_line();
+                        match mode {
+                            Mode::Normal => {
+                                edit_task(w, &app_data.tasks, selected_task_index)?;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if key_event.code == KeyCode::Char('x') {
+                        match mode {
+                            Mode::Normal => {
+                                app_data.tasks.remove(selected_task_index);
+                                if selected_task_index >= app_data.tasks.len() {
+                                    selected_task_index = app_data.tasks.len() - 1;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 _ => {
-                    animation_counter += 1;
-                    if animation_counter >= WORKING_ANIMATION_FRAMES.len() {
-                        animation_counter = 0;
-                    }
+
                 }
+            }
+        } else {
+            animation_counter += 1;
+            if animation_counter >= WORKING_ANIMATION_FRAMES.len() {
+                animation_counter = 0;
             }
         }
 
-        render(w, &app_data.tasks, selected_task_index, current_task_index, &mode, &start_time, animation_counter)?;
+        render(w, &app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
     }
 
     // Cleanup
