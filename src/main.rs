@@ -160,8 +160,14 @@ where
         let duration = Duration::seconds(task.seconds_estimated);
         let spent_in_current_session = Local::now() - start_working_time.clone();
         let spent = match mode {
-            Mode::Normal => { Duration::seconds(task.seconds_spent) }
-            Mode::Working => { Duration::seconds(task.seconds_spent) + spent_in_current_session }
+            Mode::Working => {
+                if i == 0 {
+                    Duration::seconds(task.seconds_spent) + spent_in_current_session
+                } else {
+                    Duration::seconds(task.seconds_spent)
+                }
+            }
+            _ => { Duration::seconds(task.seconds_spent) }
         };
         eta = eta + duration - spent;
 
@@ -431,6 +437,13 @@ where
             match event {
                 Event::Key(key_event) => {
                     if key_event.modifiers == KeyModifiers::CONTROL && key_event.code == KeyCode::Char('c') {
+                        match mode {
+                            Mode::Working => {
+                                let seconds_spent = Local::now() - start_working_time;
+                                app_data.tasks[0].seconds_spent += seconds_spent.num_seconds();
+                            }
+                            _ => {}
+                        }
                         save_app_data(app_data);
                         break;
                     }
