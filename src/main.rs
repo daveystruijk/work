@@ -124,7 +124,10 @@ fn save_app_data(app_data: AppData) {
     let serialized = serde_json::to_writer(&file, &app_data).unwrap();
 }
 
-pub fn read_line() -> Result<String> {
+pub fn read_line<W>(w: &mut W) -> Result<String>
+where
+    W: Write,
+{
     let mut line = String::new();
     while let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
@@ -133,21 +136,16 @@ pub fn read_line() -> Result<String> {
             }
             KeyCode::Char(c) => {
                 line.push(c);
+                execute!(
+                    w,
+                    style::Print(c),
+                )?;
             }
             _ => {}
         }
     }
 
-    return Ok(line);
-}
-
-fn render_current_task<W>(w: &mut W, task: &Task) -> Result<()>
-where
-    W: Write,
-{
-
-
-    Ok(())
+    Ok(line)
 }
 
 fn render_tasks<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, start_working_time: &DateTime<Local>, animation_counter: usize, mode: &Mode) -> Result<()>
@@ -351,13 +349,32 @@ where
     Ok(())
 }
 
-fn edit_task<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize) -> Result<()>
+fn edit_task<W>(w: &mut W) -> Result<String>
 where
     W: Write,
 {
+    queue!(
+        w,
+        style::ResetColor,
+        cursor::Show,
+        cursor::MoveTo(0, 0),
+        style::Print("Enter task description:"),
+        cursor::MoveToNextLine(1),
+    )?;
 
+    w.flush()?;
 
-    Ok(())
+    let name = read_line(w)?;
+
+    queue!(
+        w,
+        style::ResetColor,
+        terminal::Clear(ClearType::All),
+        cursor::Hide,
+        cursor::MoveTo(0, 1)
+    )?;
+
+    Ok(name)
 }
 
 fn render<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, mode: &Mode, start_working_time: &DateTime<Local>, animation_counter: usize) -> Result<()>
@@ -371,7 +388,6 @@ where
         cursor::Hide,
         cursor::MoveTo(0, 1)
     )?;
-    // render_current_task(w, &tasks[0])?;
     render_timer(w)?;
     render_tasks(w, &tasks, selected_task_index, start_working_time, animation_counter, mode)?;
     render_mode(w, mode)?;
@@ -485,7 +501,8 @@ where
                                     seconds_estimated: 15 * 60,
                                     seconds_spent: 0,
                                 });
-                                // TODO: edit task
+                                let text = edit_task(w)?;
+                                app_data.tasks[selected_task_index].text = text;
                             }
                             _ => {}
                         }
@@ -493,7 +510,8 @@ where
                     if key_event.code == KeyCode::Char('e') {
                         match mode {
                             Mode::Normal => {
-                                edit_task(w, &app_data.tasks, selected_task_index)?;
+                                let text = edit_task(w)?;
+                                app_data.tasks[selected_task_index].text = text;
                             }
                             _ => {}
                         }
