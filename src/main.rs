@@ -158,7 +158,12 @@ where
     let mut eta = Local::now();
     for (i, task) in tasks.iter().enumerate() {
         let duration = Duration::seconds(task.seconds_estimated);
-        eta = eta + duration;
+        let spent_in_current_session = Local::now() - start_working_time.clone();
+        let spent = match mode {
+            Mode::Normal => { Duration::seconds(task.seconds_spent) }
+            Mode::Working => { Duration::seconds(task.seconds_spent) + spent_in_current_session }
+        };
+        eta = eta + duration - spent;
 
         let text = format!("{}", &task.text);
         let duration_str = format!("{}", (start_of_day + duration).format("%-H:%M"));
@@ -215,6 +220,7 @@ where
         match mode {
             Mode::Working => {
                 if i == 0 {
+                    // TODO: refactor a bit
                     let spent_in_current_session = Local::now() - start_working_time.clone();
                     let spent_seconds = Duration::seconds(task.seconds_spent) + spent_in_current_session;
                     if spent_seconds.num_seconds() < task.seconds_estimated {
