@@ -81,10 +81,16 @@ enum Mode {
     Working,
 }
 
+struct AppState {
+    mode: Mode,
+    start_working_time: DateTime<Local>,
+    selected_task_index: usize,
+    animation_counter: usize,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct AppData {
     tasks: Vec<Task>,
-
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -154,15 +160,15 @@ pub fn read_line() -> Result<String> {
     Ok(line)
 }
 
-fn render_tasks(tasks: &Vec<Task>, selected_task_index: usize, start_working_time: &DateTime<Local>, animation_counter: usize, mode: &Mode) -> Result<()> {
+fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
     let (columns, _) = terminal::size()?;
     let start_of_day = Local::today().and_hms(0, 0, 0);
 
     let mut eta = Local::now();
-    for (i, task) in tasks.iter().enumerate() {
+    for (i, task) in data.tasks.iter().enumerate() {
         let duration = Duration::seconds(task.seconds_estimated);
-        let spent_in_current_session = Local::now() - start_working_time.clone();
-        let spent = match mode {
+        let spent_in_current_session = Local::now() - state.start_working_time.clone();
+        let spent = match state.mode {
             Mode::Working => {
                 if i == 0 {
                     Duration::seconds(task.seconds_spent) + spent_in_current_session
@@ -179,9 +185,9 @@ fn render_tasks(tasks: &Vec<Task>, selected_task_index: usize, start_working_tim
         let target_str = format!("{}", eta.format("%H:%M"));
 
         // Draw bullet + name
-        match mode {
+        match state.mode {
             Mode::Normal => {
-                if i == selected_task_index {
+                if i == state.selected_task_index {
                     queue!(
                         io::stdout(),
                         SetForegroundColor(Color::Yellow),
@@ -201,7 +207,7 @@ fn render_tasks(tasks: &Vec<Task>, selected_task_index: usize, start_working_tim
                     queue!(
                         io::stdout(),
                         SetForegroundColor(Color::Green),
-                        style::Print(WORKING_ANIMATION_FRAMES[animation_counter]),
+                        style::Print(WORKING_ANIMATION_FRAMES[state.animation_counter]),
                         style::Print(" "),
                         style::Print(&text),
                     )?;
@@ -226,11 +232,11 @@ fn render_tasks(tasks: &Vec<Task>, selected_task_index: usize, start_working_tim
             style::Print(&duration_str),
         )?;
 
-        match mode {
+        match state.mode {
             Mode::Working => {
                 if i == 0 {
                     // TODO: refactor a bit
-                    let spent_in_current_session = Local::now() - start_working_time.clone();
+                    let spent_in_current_session = Local::now() - state.start_working_time.clone();
                     let spent_seconds = Duration::seconds(task.seconds_spent) + spent_in_current_session;
                     if spent_seconds.num_seconds() < task.seconds_estimated {
                         let timer = start_of_day + Duration::seconds(task.seconds_estimated) - spent_seconds;
@@ -324,7 +330,7 @@ fn render_tasks(tasks: &Vec<Task>, selected_task_index: usize, start_working_tim
     Ok(())
 }
 
-fn render_timer() -> Result<()> {
+fn render_timer(data: &AppData, state: &AppState) -> Result<()> {
     let (columns, _) = terminal::size()?;
     let now = Local::now();
     let now_str = format!("{}", now.format("%-H:%M"));
@@ -341,10 +347,10 @@ fn render_timer() -> Result<()> {
     Ok(())
 }
 
-fn render_mode(mode: &Mode) -> Result<()> {
+fn render_mode(data: &AppData, state: &AppState) -> Result<()> {
     let (_, rows) = terminal::size()?;
 
-    let mode_str = match mode {
+    let mode_str = match state.mode {
         Mode::Normal => "NORMAL",
         Mode::Working => "WORKING",
     };
@@ -383,7 +389,7 @@ fn edit_task() -> Result<String> {
     Ok(name)
 }
 
-fn render(tasks: &Vec<Task>, selected_task_index: usize, mode: &Mode, start_working_time: &DateTime<Local>, animation_counter: usize) -> Result<()> {
+fn render(data: &AppData, state: &AppState) -> Result<()> {
     queue!(
         io::stdout(),
         style::ResetColor,
@@ -391,9 +397,9 @@ fn render(tasks: &Vec<Task>, selected_task_index: usize, mode: &Mode, start_work
         cursor::Hide,
         cursor::MoveTo(0, 1)
     )?;
-    render_timer()?;
-    render_tasks(&tasks, selected_task_index, start_working_time, animation_counter, mode)?;
-    render_mode(mode)?;
+    render_timer(&data, &state)?;
+    render_tasks(&data, &state)?;
+    render_mode(&data, &state)?;
     io::stdout().flush()?;
 
     Ok(())
@@ -405,131 +411,135 @@ fn main() -> Result<()> {
         save_app_data(default_app_data());
     }
 
-    let mut app_data: AppData = load_app_data();
+    // Load data & Initialize state
+    let mut data: AppData = load_app_data();
+    let mut state: AppState = AppState {
+        mode: Mode::Normal,
+        start_working_time: Local::now(),
+        selected_task_index: 0,
+        animation_counter: 0,
+    };
 
-    let mut mode: Mode = Mode::Normal;
-    let mut start_working_time = Local::now();
-
-    let mut selected_task_index: usize = 0;
-    let mut animation_counter: usize = 0;
-
+    // Setup terminal
     execute!(io::stdout(), terminal::EnterAlternateScreen)?;
     terminal::enable_raw_mode()?;
-    render(&app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
 
+    // Main loop
     loop {
-        // Wait up to 1s for another event
+        render(&data, &state)?;
+
+        // Wait up to 1s for an input event
         if poll(time::Duration::from_millis(1_000))? {
             let event = read()?;
 
             match event {
                 Event::Key(key_event) => {
                     if key_event.modifiers == KeyModifiers::CONTROL && key_event.code == KeyCode::Char('c') {
-                        match mode {
+                        match state.mode {
                             Mode::Working => {
-                                let seconds_spent = Local::now() - start_working_time;
-                                app_data.tasks[0].seconds_spent += seconds_spent.num_seconds();
+                                let seconds_spent = Local::now() - state.start_working_time;
+                                data.tasks[0].seconds_spent += seconds_spent.num_seconds();
                             }
                             _ => {}
                         }
-                        save_app_data(app_data);
+                        save_app_data(data);
                         break;
                     }
                     if key_event.code == KeyCode::Enter {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
-                                mode = Mode::Working;
-                                start_working_time = Local::now();
+                                state.mode = Mode::Working;
+                                state.start_working_time = Local::now();
                             }
                             Mode::Working => {
-                                mode = Mode::Normal;
-                                let seconds_spent = Local::now() - start_working_time;
-                                app_data.tasks[0].seconds_spent += seconds_spent.num_seconds();
+                                state.mode = Mode::Normal;
+                                let seconds_spent = Local::now() - state.start_working_time;
+                                data.tasks[0].seconds_spent += seconds_spent.num_seconds();
                             }
                         }
                     }
                     if key_event.code == KeyCode::Esc {
-                        mode = Mode::Normal;
+                        state.mode = Mode::Normal;
                     }
                     if key_event.code == KeyCode::Char('J') {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
-                                if selected_task_index + 1 < app_data.tasks.len() {
-                                    app_data.tasks.swap(selected_task_index, selected_task_index + 1);
-                                    selected_task_index = selected_task_index + 1;
+                                if state.selected_task_index + 1 < data.tasks.len() {
+                                    data.tasks.swap(state.selected_task_index, state.selected_task_index + 1);
+                                    state.selected_task_index = state.selected_task_index + 1;
                                 }
                             }
                             _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('K') {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
-                                if selected_task_index != 0 {
-                                    app_data.tasks.swap(selected_task_index, selected_task_index - 1);
-                                    selected_task_index = selected_task_index - 1;
+                                if state.selected_task_index != 0 {
+                                    data.tasks.swap(state.selected_task_index, state.selected_task_index - 1);
+                                    state.selected_task_index = state.selected_task_index - 1;
                                 }
                             }
                             _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('j') {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
-                                if selected_task_index + 1 < app_data.tasks.len() {
-                                    selected_task_index = selected_task_index + 1;
+                                if state.selected_task_index + 1 < data.tasks.len() {
+                                    state.selected_task_index = state.selected_task_index + 1;
                                 }
                             }
                             _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('k') {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
-                                if selected_task_index != 0 {
-                                    selected_task_index = selected_task_index - 1;
+                                if state.selected_task_index != 0 {
+                                    state.selected_task_index = state.selected_task_index - 1;
                                 }
                             }
                             _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('+') || key_event.code == KeyCode::Char('=') {
-                        app_data.tasks[selected_task_index].seconds_estimated += 15 * 60;
+                        data.tasks[state.selected_task_index].seconds_estimated += 15 * 60;
                     }
                     if key_event.code == KeyCode::Char('-') || key_event.code == KeyCode::Char('_') {
-                        app_data.tasks[selected_task_index].seconds_estimated = max(15 * 60, app_data.tasks[selected_task_index].seconds_estimated - 15 * 60);
+                        data.tasks[state.selected_task_index].seconds_estimated = max(15 * 60, data.tasks[state.selected_task_index].seconds_estimated - 15 * 60);
                     }
                     if key_event.code == KeyCode::Char('n') {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
-                                selected_task_index = app_data.tasks.len();
-                                app_data.tasks.push(Task {
+                                state.selected_task_index = data.tasks.len();
+                                data.tasks.push(Task {
                                     text: String::from(""),
                                     seconds_estimated: 15 * 60,
                                     seconds_spent: 0,
                                     level: 0,
                                 });
                                 let text = edit_task()?;
-                                app_data.tasks[selected_task_index].text = text;
+                                data.tasks[state.selected_task_index].text = text;
                             }
                             _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('e') {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
                                 let text = edit_task()?;
-                                app_data.tasks[selected_task_index].text = text;
+                                data.tasks[state.selected_task_index].text = text;
                             }
                             _ => {}
                         }
                     }
                     if key_event.code == KeyCode::Char('x') {
-                        match mode {
+                        match state.mode {
                             Mode::Normal => {
-                                app_data.tasks.remove(selected_task_index);
-                                if selected_task_index >= app_data.tasks.len() {
-                                    selected_task_index = app_data.tasks.len() - 1;
+                                data.tasks.remove(state.selected_task_index);
+                                if state.selected_task_index >= data.tasks.len() {
+                                    state.selected_task_index = data.tasks.len() - 1;
                                 }
                             }
                             _ => {}
@@ -541,16 +551,14 @@ fn main() -> Result<()> {
                 }
             }
         } else {
-            animation_counter += 1;
-            if animation_counter >= WORKING_ANIMATION_FRAMES.len() {
-                animation_counter = 0;
+            state.animation_counter += 1;
+            if state.animation_counter >= WORKING_ANIMATION_FRAMES.len() {
+                state.animation_counter = 0;
             }
         }
-
-        render(&app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
     }
 
-    // Cleanup
+    // Cleanup terminal
     execute!(
         io::stdout(),
         style::ResetColor,
