@@ -1,24 +1,22 @@
 use serde_json;
 use serde::{Serialize, Deserialize};
-use chrono::{Datelike, DateTime, Timelike, Duration, Local};
+use chrono::{DateTime, Duration, Local};
 
 
 use std::{
-    io::{self, stdout, Write},
-    time::{self, Instant},
-    cmp::{min, max},
+    io::{self, Write},
+    time::{self},
+    cmp::{max},
     fs::{File},
     path::{Path},
 };
 
 use crossterm::{
-    cursor::{self, position},
+    cursor::{self},
     event::{self, poll, read, Event, KeyCode, KeyEvent, KeyModifiers},
-    style::{self, SetForegroundColor, SetBackgroundColor, Color},
+    style::{self, SetForegroundColor, Color},
     terminal::{self, ClearType},
     execute,
-    ExecutableCommand,
-    QueueableCommand,
     queue,
     Result,
 };
@@ -28,15 +26,15 @@ use crossterm::{
 // - arrange day
 
 // Keys:
-// - j/k: navigate
-// - n: new task
-// - enter: complete task
-// - x: delete task
-// - backspace: ignore task
-// - >: defer task
-// - u: undo
-// - +/-: increase/decrease duration by 15m
-// - e/i: edit
+// [x] j/k: navigate
+// [x] n: new task
+// [ ] enter: start working
+// [ ] x: delete task
+// [ ] backspace: ignore task
+// [ ] </>: move subtask level
+// [ ] u: undo
+// [x] +/-: increase/decrease duration by 15m
+// [x] e: edit
 
 // Features:
 // - 'scrollback' to completed tasks
@@ -94,6 +92,7 @@ struct Task {
     text: String,
     seconds_estimated: i64,
     seconds_spent: i64,
+    level: u32,
 }
 
 fn default_app_data() -> AppData {
@@ -102,11 +101,13 @@ fn default_app_data() -> AppData {
             text: String::from("Task 1"),
             seconds_estimated: 30 * 60,
             seconds_spent: 0,
+            level: 0,
         },
         Task {
             text: String::from("Task 2"),
             seconds_estimated: 30 * 60,
             seconds_spent: 0,
+            level: 0,
         }
     ];
     let app_data: AppData = AppData { tasks };
@@ -124,10 +125,7 @@ fn save_app_data(app_data: AppData) {
     serde_json::to_writer(&file, &app_data).unwrap();
 }
 
-pub fn read_line<W>(w: &mut W) -> Result<String>
-where
-    W: Write,
-{
+pub fn read_line() -> Result<String> {
     let mut line = String::new();
     while let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
@@ -137,7 +135,7 @@ where
             KeyCode::Char(c) => {
                 line.push(c);
                 execute!(
-                    w,
+                    io::stdout(),
                     style::Print(c),
                 )?;
             }
@@ -145,7 +143,7 @@ where
             KeyCode::Backspace => {
                 line.pop();
                 execute!(
-                    w,
+                    io::stdout(),
                     style::Print("\x08 \x08"),  // Print backspace
                 )?;
             }
@@ -156,11 +154,8 @@ where
     Ok(line)
 }
 
-fn render_tasks<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, start_working_time: &DateTime<Local>, animation_counter: usize, mode: &Mode) -> Result<()>
-where
-    W: Write,
-{
-    let (columns, rows) = terminal::size()?;
+fn render_tasks(tasks: &Vec<Task>, selected_task_index: usize, start_working_time: &DateTime<Local>, animation_counter: usize, mode: &Mode) -> Result<()> {
+    let (columns, _) = terminal::size()?;
     let start_of_day = Local::today().and_hms(0, 0, 0);
 
     let mut eta = Local::now();
@@ -188,14 +183,14 @@ where
             Mode::Normal => {
                 if i == selected_task_index {
                     queue!(
-                        w,
+                        io::stdout(),
                         SetForegroundColor(Color::Yellow),
                         style::Print("• "),
                         style::Print(&text),
                     )?;
                 } else {
                     queue!(
-                        w,
+                        io::stdout(),
                         style::Print("· "),
                         style::Print(&text),
                     )?;
@@ -204,7 +199,7 @@ where
             Mode::Working => {
                 if i == 0 {
                     queue!(
-                        w,
+                        io::stdout(),
                         SetForegroundColor(Color::Green),
                         style::Print(WORKING_ANIMATION_FRAMES[animation_counter]),
                         style::Print(" "),
@@ -212,7 +207,7 @@ where
                     )?;
                 } else {
                     queue!(
-                        w,
+                        io::stdout(),
                         style::Print("· "),
                         style::Print(&text),
                     )?;
@@ -222,7 +217,7 @@ where
 
         // Draw seconds_estimated + eta
         queue!(
-            w,
+            io::stdout(),
             SetForegroundColor(Color::DarkGrey),
             cursor::MoveToColumn(columns - (target_str.len() - 1) as u16),
             style::Print(&target_str),
@@ -241,7 +236,7 @@ where
                         let timer = start_of_day + Duration::seconds(task.seconds_estimated) - spent_seconds;
                         let timer_str = format!("{}", timer.format("%-H:%M:%S"));
                         queue!(
-                            w,
+                            io::stdout(),
                             cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
                             SetForegroundColor(Color::Green),
                             style::Print("+"),
@@ -252,7 +247,7 @@ where
                         let timer = start_of_day + (spent_seconds - Duration::seconds(task.seconds_estimated));
                         let timer_str = format!("{}", timer.format("%-H:%M:%S"));
                         queue!(
-                            w,
+                            io::stdout(),
                             cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
                             SetForegroundColor(Color::Red),
                             style::Print("-"),
@@ -267,7 +262,7 @@ where
                             let timer = start_of_day + Duration::seconds(task.seconds_estimated) - spent_seconds;
                             let timer_str = format!("{}", timer.format("%-H:%M:%S"));
                             queue!(
-                                w,
+                                io::stdout(),
                                 cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
                                 SetForegroundColor(Color::Green),
                                 style::Print("+"),
@@ -278,7 +273,7 @@ where
                             let timer = start_of_day + (spent_seconds - Duration::seconds(task.seconds_estimated));
                             let timer_str = format!("{}", timer.format("%-H:%M:%S"));
                             queue!(
-                                w,
+                                io::stdout(),
                                 cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
                                 SetForegroundColor(Color::Red),
                                 style::Print("-"),
@@ -296,7 +291,7 @@ where
                         let timer = start_of_day + Duration::seconds(task.seconds_estimated) - spent_seconds;
                         let timer_str = format!("{}", timer.format("%-H:%M:%S"));
                         queue!(
-                            w,
+                            io::stdout(),
                             cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
                             SetForegroundColor(Color::Green),
                             style::Print("+"),
@@ -307,7 +302,7 @@ where
                         let timer = start_of_day + (spent_seconds - Duration::seconds(task.seconds_estimated));
                         let timer_str = format!("{}", timer.format("%-H:%M:%S"));
                         queue!(
-                            w,
+                            io::stdout(),
                             cursor::MoveToColumn(columns - 13 - (timer_str.len() - 0) as u16),
                             SetForegroundColor(Color::Red),
                             style::Print("-"),
@@ -320,7 +315,7 @@ where
         }
 
         queue!(
-            w,
+            io::stdout(),
             style::ResetColor,
             cursor::MoveToNextLine(2)
         )?;
@@ -329,16 +324,13 @@ where
     Ok(())
 }
 
-fn render_timer<W>(w: &mut W) -> Result<()>
-where
-    W: Write,
-{
-    let (columns, rows) = terminal::size()?;
+fn render_timer() -> Result<()> {
+    let (columns, _) = terminal::size()?;
     let now = Local::now();
     let now_str = format!("{}", now.format("%-H:%M"));
 
     queue!(
-        w,
+        io::stdout(),
         SetForegroundColor(Color::Green),
         cursor::MoveToColumn(columns - 0 - (now_str.len() - 1) as u16),
         style::Print(&now_str),
@@ -349,11 +341,8 @@ where
     Ok(())
 }
 
-fn render_mode<W>(w: &mut W, mode: &Mode) -> Result<()>
-where
-    W: Write,
-{
-    let (columns, rows) = terminal::size()?;
+fn render_mode(mode: &Mode) -> Result<()> {
+    let (_, rows) = terminal::size()?;
 
     let mode_str = match mode {
         Mode::Normal => "NORMAL",
@@ -361,7 +350,7 @@ where
     };
 
     queue!(
-        w,
+        io::stdout(),
         cursor::MoveTo(0, rows),
         style::Print(format!("-- {} --", &mode_str)),
     )?;
@@ -369,12 +358,9 @@ where
     Ok(())
 }
 
-fn edit_task<W>(w: &mut W) -> Result<String>
-where
-    W: Write,
-{
+fn edit_task() -> Result<String> {
     queue!(
-        w,
+        io::stdout(),
         style::ResetColor,
         cursor::Show,
         cursor::MoveTo(0, 0),
@@ -382,12 +368,12 @@ where
         cursor::MoveToNextLine(1),
     )?;
 
-    w.flush()?;
+    io::stdout().flush()?;
 
-    let name = read_line(w)?;
+    let name = read_line()?;
 
     queue!(
-        w,
+        io::stdout(),
         style::ResetColor,
         terminal::Clear(ClearType::All),
         cursor::Hide,
@@ -397,29 +383,23 @@ where
     Ok(name)
 }
 
-fn render<W>(w: &mut W, tasks: &Vec<Task>, selected_task_index: usize, mode: &Mode, start_working_time: &DateTime<Local>, animation_counter: usize) -> Result<()>
-where
-    W: Write,
-{
+fn render(tasks: &Vec<Task>, selected_task_index: usize, mode: &Mode, start_working_time: &DateTime<Local>, animation_counter: usize) -> Result<()> {
     queue!(
-        w,
+        io::stdout(),
         style::ResetColor,
         terminal::Clear(ClearType::All),
         cursor::Hide,
         cursor::MoveTo(0, 1)
     )?;
-    render_timer(w)?;
-    render_tasks(w, &tasks, selected_task_index, start_working_time, animation_counter, mode)?;
-    render_mode(w, mode)?;
-    w.flush()?;
+    render_timer()?;
+    render_tasks(&tasks, selected_task_index, start_working_time, animation_counter, mode)?;
+    render_mode(mode)?;
+    io::stdout().flush()?;
 
     Ok(())
 }
 
-fn run<W>(w: &mut W) -> Result<()>
-where
-    W: Write,
-{
+fn main() -> Result<()> {
     // If no app data exists, create the file with default values
     if !Path::new(APP_DATA_FILENAME).exists() {
         save_app_data(default_app_data());
@@ -433,9 +413,9 @@ where
     let mut selected_task_index: usize = 0;
     let mut animation_counter: usize = 0;
 
-    execute!(w, terminal::EnterAlternateScreen)?;
+    execute!(io::stdout(), terminal::EnterAlternateScreen)?;
     terminal::enable_raw_mode()?;
-    render(w, &app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
+    render(&app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
 
     loop {
         // Wait up to 1s for another event
@@ -527,8 +507,9 @@ where
                                     text: String::from(""),
                                     seconds_estimated: 15 * 60,
                                     seconds_spent: 0,
+                                    level: 0,
                                 });
-                                let text = edit_task(w)?;
+                                let text = edit_task()?;
                                 app_data.tasks[selected_task_index].text = text;
                             }
                             _ => {}
@@ -537,7 +518,7 @@ where
                     if key_event.code == KeyCode::Char('e') {
                         match mode {
                             Mode::Normal => {
-                                let text = edit_task(w)?;
+                                let text = edit_task()?;
                                 app_data.tasks[selected_task_index].text = text;
                             }
                             _ => {}
@@ -566,20 +547,15 @@ where
             }
         }
 
-        render(w, &app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
+        render(&app_data.tasks, selected_task_index, &mode, &start_working_time, animation_counter)?;
     }
 
     // Cleanup
     execute!(
-        w,
+        io::stdout(),
         style::ResetColor,
         cursor::Show,
         terminal::LeaveAlternateScreen
     )?;
     terminal::disable_raw_mode()
-}
-
-fn main() -> Result<()> {
-    let mut stderr = io::stdout();
-    run(&mut stderr)
 }
