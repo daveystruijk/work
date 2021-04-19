@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, Local};
 use std::{
     io::{self, Write},
     time::{self},
-    cmp::{max},
+    cmp::{min, max},
     fs::{File},
     path::{Path},
 };
@@ -37,14 +37,14 @@ use crossterm::{
 // [x] e: edit
 
 // Features:
-// - 'scrollback' to completed tasks
-// - Timer
-// - lunch e.d.
-// - persistent db (serialization of tasks/events)
-// - Monthly log (jump to day)
-// - Nice (random) animation on task completion
-// - Flicker on task selection / work start
-// - Auto git (branch creation) and merge request + ticket integration
+// [ ] 'scrollback' to completed tasks
+// [x] Timer
+// [ ] lunch e.d.
+// [x] persistent db (serialization of tasks/events)
+// [ ] Monthly log (jump to day)
+// [ ] Nice (random) animation on task completion
+// [ ] Flicker on task selection / work start
+// [ ] Auto git (branch creation) and merge request + ticket integration
 
 // DATA STRUCTURES
 
@@ -98,7 +98,7 @@ struct Task {
     text: String,
     seconds_estimated: i64,
     seconds_spent: i64,
-    level: u32,
+    level: i32,
 }
 
 fn default_app_data() -> AppData {
@@ -166,6 +166,14 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
 
     let mut eta = Local::now();
     for (i, task) in data.tasks.iter().enumerate() {
+
+        let num_newlines = match task.level { 0 => { 2 }, _ => { 1 } };
+        queue!(
+            io::stdout(),
+            style::ResetColor,
+            cursor::MoveToNextLine(num_newlines)
+        )?;
+
         let duration = Duration::seconds(task.seconds_estimated);
         let spent_in_current_session = Local::now() - state.start_working_time.clone();
         let spent = match state.mode {
@@ -184,19 +192,21 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
         let duration_str = format!("{}", (start_of_day + duration).format("%-H:%M"));
         let target_str = format!("{}", eta.format("%H:%M"));
 
-        // Draw bullet + task name
+        // Draw dot + task name
         match state.mode {
             Mode::Normal => {
                 if i == state.selected_task_index {
                     queue!(
                         io::stdout(),
                         SetForegroundColor(Color::Yellow),
+                        style::Print(" ".repeat(task.level as usize)),
                         style::Print("• "),
                         style::Print(&text),
                     )?;
                 } else {
                     queue!(
                         io::stdout(),
+                        style::Print(" ".repeat(task.level as usize)),
                         style::Print("· "),
                         style::Print(&text),
                     )?;
@@ -319,12 +329,6 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
                 }
             }
         }
-
-        queue!(
-            io::stdout(),
-            style::ResetColor,
-            cursor::MoveToNextLine(2)
-        )?;
     }
 
     Ok(())
@@ -340,8 +344,7 @@ fn render_timer() -> Result<()> {
         SetForegroundColor(Color::Green),
         cursor::MoveToColumn(columns - 0 - (now_str.len() - 1) as u16),
         style::Print(&now_str),
-        style::ResetColor,
-        cursor::MoveToNextLine(2)
+        style::ResetColor
     )?;
 
     Ok(())
@@ -522,6 +525,22 @@ fn main() -> Result<()> {
                 Event::Key(KeyEvent { code: KeyCode::Char('-'), .. }) |
                 Event::Key(KeyEvent { code: KeyCode::Char('_'), .. }) => {
                     data.tasks[state.selected_task_index].seconds_estimated = max(15 * 60, data.tasks[state.selected_task_index].seconds_estimated - 15 * 60);
+                }
+
+                // >
+                Event::Key(KeyEvent { code: KeyCode::Char('>'), .. }) => {
+                    data.tasks[state.selected_task_index].level = min(
+                        data.tasks[state.selected_task_index].level + 1,
+                        5,
+                    );
+                }
+
+                // <
+                Event::Key(KeyEvent { code: KeyCode::Char('<'), .. }) => {
+                    data.tasks[state.selected_task_index].level = max(
+                        0,
+                        data.tasks[state.selected_task_index].level - 1,
+                    );
                 }
 
                 // n
