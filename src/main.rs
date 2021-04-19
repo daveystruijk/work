@@ -430,124 +430,142 @@ fn main() -> Result<()> {
 
         // Wait up to 1s for an input event
         if event::poll(time::Duration::from_millis(1_000))? {
-            let event = event::read()?;
-            match event {
-                Event::Key(key_event) => {
-                    if key_event.modifiers == KeyModifiers::CONTROL && key_event.code == KeyCode::Char('c') {
-                        match state.mode {
-                            Mode::Working => {
-                                let seconds_spent = Local::now() - state.start_working_time;
-                                data.tasks[0].seconds_spent += seconds_spent.num_seconds();
-                            }
-                            _ => {}
-                        }
-                        save_app_data(data);
-                        break;
-                    }
-                    if key_event.code == KeyCode::Enter {
-                        match state.mode {
-                            Mode::Normal => {
-                                state.mode = Mode::Working;
-                                state.start_working_time = Local::now();
-                            }
-                            Mode::Working => {
-                                state.mode = Mode::Normal;
-                                let seconds_spent = Local::now() - state.start_working_time;
-                                data.tasks[0].seconds_spent += seconds_spent.num_seconds();
-                            }
-                        }
-                    }
-                    if key_event.code == KeyCode::Esc {
-                        state.mode = Mode::Normal;
-                    }
-                    if key_event.code == KeyCode::Char('J') {
-                        match state.mode {
-                            Mode::Normal => {
-                                if state.selected_task_index + 1 < data.tasks.len() {
-                                    data.tasks.swap(state.selected_task_index, state.selected_task_index + 1);
-                                    state.selected_task_index = state.selected_task_index + 1;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if key_event.code == KeyCode::Char('K') {
-                        match state.mode {
-                            Mode::Normal => {
-                                if state.selected_task_index != 0 {
-                                    data.tasks.swap(state.selected_task_index, state.selected_task_index - 1);
-                                    state.selected_task_index = state.selected_task_index - 1;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if key_event.code == KeyCode::Char('j') {
-                        match state.mode {
-                            Mode::Normal => {
-                                if state.selected_task_index + 1 < data.tasks.len() {
-                                    state.selected_task_index = state.selected_task_index + 1;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if key_event.code == KeyCode::Char('k') {
-                        match state.mode {
-                            Mode::Normal => {
-                                if state.selected_task_index != 0 {
-                                    state.selected_task_index = state.selected_task_index - 1;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if key_event.code == KeyCode::Char('+') || key_event.code == KeyCode::Char('=') {
-                        data.tasks[state.selected_task_index].seconds_estimated += 15 * 60;
-                    }
-                    if key_event.code == KeyCode::Char('-') || key_event.code == KeyCode::Char('_') {
-                        data.tasks[state.selected_task_index].seconds_estimated = max(15 * 60, data.tasks[state.selected_task_index].seconds_estimated - 15 * 60);
-                    }
-                    if key_event.code == KeyCode::Char('n') {
-                        match state.mode {
-                            Mode::Normal => {
-                                state.selected_task_index = data.tasks.len();
-                                data.tasks.push(Task {
-                                    text: String::from(""),
-                                    seconds_estimated: 15 * 60,
-                                    seconds_spent: 0,
-                                    level: 0,
-                                });
-                                let text = edit_task()?;
-                                data.tasks[state.selected_task_index].text = text;
-                            }
-                            _ => {}
-                        }
-                    }
-                    if key_event.code == KeyCode::Char('e') {
-                        match state.mode {
-                            Mode::Normal => {
-                                let text = edit_task()?;
-                                data.tasks[state.selected_task_index].text = text;
-                            }
-                            _ => {}
-                        }
-                    }
-                    if key_event.code == KeyCode::Char('x') {
-                        match state.mode {
-                            Mode::Normal => {
-                                data.tasks.remove(state.selected_task_index);
-                                if state.selected_task_index >= data.tasks.len() {
-                                    state.selected_task_index = data.tasks.len() - 1;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {
+            match event::read()? {
 
+                // Ctrl+C -> Exit program
+                Event::Key(KeyEvent {
+                    modifiers: KeyModifiers::CONTROL,
+                    code: KeyCode::Char('c'),
+                }) => {
+                    match state.mode {
+                        Mode::Working => {
+                            let seconds_spent = Local::now() - state.start_working_time;
+                            data.tasks[0].seconds_spent += seconds_spent.num_seconds();
+                        }
+                        _ => {}
+                    }
+                    break;
                 }
+
+                // Enter -> Switch mode
+                Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            state.mode = Mode::Working;
+                            state.start_working_time = Local::now();
+                        }
+                        Mode::Working => {
+                            state.mode = Mode::Normal;
+                            let seconds_spent = Local::now() - state.start_working_time;
+                            data.tasks[0].seconds_spent += seconds_spent.num_seconds();
+                        }
+                    }
+                }
+
+                // J
+                Event::Key(KeyEvent { code: KeyCode::Char('J'), .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            if state.selected_task_index + 1 < data.tasks.len() {
+                                data.tasks.swap(state.selected_task_index, state.selected_task_index + 1);
+                                state.selected_task_index = state.selected_task_index + 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // K
+                Event::Key(KeyEvent { code: KeyCode::Char('K'), .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            if state.selected_task_index != 0 {
+                                data.tasks.swap(state.selected_task_index, state.selected_task_index - 1);
+                                state.selected_task_index = state.selected_task_index - 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // j
+                Event::Key(KeyEvent { code: KeyCode::Char('j'), .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            if state.selected_task_index + 1 < data.tasks.len() {
+                                state.selected_task_index = state.selected_task_index + 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // k
+                Event::Key(KeyEvent { code: KeyCode::Char('k'), .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            if state.selected_task_index != 0 {
+                                state.selected_task_index = state.selected_task_index - 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // +
+                Event::Key(KeyEvent { code: KeyCode::Char('+'), .. }) => {
+                    // TODO: =
+                    data.tasks[state.selected_task_index].seconds_estimated += 15 * 60;
+                }
+
+                // -
+                Event::Key(KeyEvent { code: KeyCode::Char('-'), .. }) => {
+                    // TODO: _
+                    data.tasks[state.selected_task_index].seconds_estimated = max(15 * 60, data.tasks[state.selected_task_index].seconds_estimated - 15 * 60);
+                }
+
+                // n
+                Event::Key(KeyEvent { code: KeyCode::Char('n'), .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            state.selected_task_index = data.tasks.len();
+                            data.tasks.push(Task {
+                                text: String::from(""),
+                                seconds_estimated: 15 * 60,
+                                seconds_spent: 0,
+                                level: 0,
+                            });
+                            let text = edit_task()?;
+                            data.tasks[state.selected_task_index].text = text;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // e
+                Event::Key(KeyEvent { code: KeyCode::Char('e'), .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            let text = edit_task()?;
+                            data.tasks[state.selected_task_index].text = text;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // x
+                Event::Key(KeyEvent { code: KeyCode::Char('x'), .. }) => {
+                    match state.mode {
+                        Mode::Normal => {
+                            data.tasks.remove(state.selected_task_index);
+                            if state.selected_task_index >= data.tasks.len() {
+                                state.selected_task_index = data.tasks.len() - 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
         } else {
             state.animation_counter += 1;
@@ -556,6 +574,9 @@ fn main() -> Result<()> {
             }
         }
     }
+
+    // Persist data on exit
+    save_app_data(data);
 
     // Cleanup terminal
     execute!(
