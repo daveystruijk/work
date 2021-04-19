@@ -512,15 +512,15 @@ fn main() -> Result<()> {
                     }
                 }
 
-                // +
-                Event::Key(KeyEvent { code: KeyCode::Char('+'), .. }) => {
-                    // TODO: =
+                // + or =
+                Event::Key(KeyEvent { code: KeyCode::Char('+'), .. }) |
+                Event::Key(KeyEvent { code: KeyCode::Char('='), .. }) => {
                     data.tasks[state.selected_task_index].seconds_estimated += 15 * 60;
                 }
 
-                // -
-                Event::Key(KeyEvent { code: KeyCode::Char('-'), .. }) => {
-                    // TODO: _
+                // - or _
+                Event::Key(KeyEvent { code: KeyCode::Char('-'), .. }) |
+                Event::Key(KeyEvent { code: KeyCode::Char('_'), .. }) => {
                     data.tasks[state.selected_task_index].seconds_estimated = max(15 * 60, data.tasks[state.selected_task_index].seconds_estimated - 15 * 60);
                 }
 
