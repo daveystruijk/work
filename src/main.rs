@@ -121,7 +121,7 @@ fn load_app_data() -> AppData {
 
 fn save_app_data(app_data: AppData) {
 	let file = File::create(APP_DATA_FILENAME).unwrap();
-    let serialized = serde_json::to_writer(&file, &app_data).unwrap();
+    serde_json::to_writer(&file, &app_data).unwrap();
 }
 
 pub fn read_line<W>(w: &mut W) -> Result<String>
@@ -139,6 +139,14 @@ where
                 execute!(
                     w,
                     style::Print(c),
+                )?;
+            }
+
+            KeyCode::Backspace => {
+                line.pop();
+                execute!(
+                    w,
+                    style::Print("\x08 \x08"),  // Print backspace
                 )?;
             }
             _ => {}
@@ -355,7 +363,7 @@ where
     queue!(
         w,
         cursor::MoveTo(0, rows),
-        style::Print(format!("-- {} --", &mode_str))
+        style::Print(format!("-- {} --", &mode_str)),
     )?;
 
     Ok(())
