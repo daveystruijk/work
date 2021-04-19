@@ -13,7 +13,7 @@ use std::{
 
 use crossterm::{
     cursor::{self},
-    event::{self, poll, read, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style::{self, SetForegroundColor, Color},
     terminal::{self, ClearType},
     execute,
@@ -184,7 +184,7 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
         let duration_str = format!("{}", (start_of_day + duration).format("%-H:%M"));
         let target_str = format!("{}", eta.format("%H:%M"));
 
-        // Draw bullet + name
+        // Draw bullet + task name
         match state.mode {
             Mode::Normal => {
                 if i == state.selected_task_index {
@@ -330,7 +330,7 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
     Ok(())
 }
 
-fn render_timer(data: &AppData, state: &AppState) -> Result<()> {
+fn render_timer() -> Result<()> {
     let (columns, _) = terminal::size()?;
     let now = Local::now();
     let now_str = format!("{}", now.format("%-H:%M"));
@@ -347,7 +347,7 @@ fn render_timer(data: &AppData, state: &AppState) -> Result<()> {
     Ok(())
 }
 
-fn render_mode(data: &AppData, state: &AppState) -> Result<()> {
+fn render_mode(state: &AppState) -> Result<()> {
     let (_, rows) = terminal::size()?;
 
     let mode_str = match state.mode {
@@ -397,9 +397,9 @@ fn render(data: &AppData, state: &AppState) -> Result<()> {
         cursor::Hide,
         cursor::MoveTo(0, 1)
     )?;
-    render_timer(&data, &state)?;
+    render_timer()?;
     render_tasks(&data, &state)?;
-    render_mode(&data, &state)?;
+    render_mode(&state)?;
     io::stdout().flush()?;
 
     Ok(())
@@ -429,9 +429,8 @@ fn main() -> Result<()> {
         render(&data, &state)?;
 
         // Wait up to 1s for an input event
-        if poll(time::Duration::from_millis(1_000))? {
-            let event = read()?;
-
+        if event::poll(time::Duration::from_millis(1_000))? {
+            let event = event::read()?;
             match event {
                 Event::Key(key_event) => {
                     if key_event.modifiers == KeyModifiers::CONTROL && key_event.code == KeyCode::Char('c') {
