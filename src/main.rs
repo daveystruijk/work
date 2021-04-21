@@ -31,7 +31,6 @@ use crossterm::{
 // [ ] enter: start working
 // [ ] x: delete task
 // [ ] backspace: ignore task
-// [ ] </>: move subtask level
 // [ ] u: undo
 // [x] +/-: increase/decrease duration by 15m
 // [x] e: edit
@@ -98,7 +97,6 @@ struct Task {
     text: String,
     seconds_estimated: i64,
     seconds_spent: i64,
-    level: i32,
 }
 
 fn default_app_data() -> AppData {
@@ -107,13 +105,11 @@ fn default_app_data() -> AppData {
             text: String::from("Task 1"),
             seconds_estimated: 30 * 60,
             seconds_spent: 0,
-            level: 0,
         },
         Task {
             text: String::from("Task 2"),
             seconds_estimated: 30 * 60,
             seconds_spent: 0,
-            level: 0,
         }
     ];
     let app_data: AppData = AppData { tasks };
@@ -167,11 +163,10 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
     let mut eta = Local::now();
     for (i, task) in data.tasks.iter().enumerate() {
 
-        let num_newlines = match task.level { 0 => { 2 }, _ => { 1 } };
         queue!(
             io::stdout(),
             style::ResetColor,
-            cursor::MoveToNextLine(num_newlines)
+            cursor::MoveToNextLine(2)
         )?;
 
         let duration = Duration::seconds(task.seconds_estimated);
@@ -199,14 +194,12 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
                     queue!(
                         io::stdout(),
                         SetForegroundColor(Color::Yellow),
-                        style::Print(" ".repeat(task.level as usize)),
                         style::Print("• "),
                         style::Print(&text),
                     )?;
                 } else {
                     queue!(
                         io::stdout(),
-                        style::Print(" ".repeat(task.level as usize)),
                         style::Print("· "),
                         style::Print(&text),
                     )?;
@@ -222,10 +215,15 @@ fn render_tasks(data: &AppData, state: &AppState) -> Result<()> {
                         style::Print(&text),
                     )?;
                 } else {
+                    let hidden_text: String = text.chars().map(|c| match c { 
+                        ' ' => ' ', 
+                        _ => '-',
+                    }).collect();
                     queue!(
                         io::stdout(),
+                        SetForegroundColor(Color::DarkGrey),
                         style::Print("· "),
-                        style::Print(&text),
+                        style::Print(&hidden_text),
                     )?;
                 }
             }
@@ -527,22 +525,6 @@ fn main() -> Result<()> {
                     data.tasks[state.selected_task_index].seconds_estimated = max(15 * 60, data.tasks[state.selected_task_index].seconds_estimated - 15 * 60);
                 }
 
-                // >
-                Event::Key(KeyEvent { code: KeyCode::Char('>'), .. }) => {
-                    data.tasks[state.selected_task_index].level = min(
-                        data.tasks[state.selected_task_index].level + 1,
-                        5,
-                    );
-                }
-
-                // <
-                Event::Key(KeyEvent { code: KeyCode::Char('<'), .. }) => {
-                    data.tasks[state.selected_task_index].level = max(
-                        0,
-                        data.tasks[state.selected_task_index].level - 1,
-                    );
-                }
-
                 // n
                 Event::Key(KeyEvent { code: KeyCode::Char('n'), .. }) => {
                     match state.mode {
@@ -552,7 +534,6 @@ fn main() -> Result<()> {
                                 text: String::from(""),
                                 seconds_estimated: 15 * 60,
                                 seconds_spent: 0,
-                                level: 0,
                             });
                             let text = edit_task()?;
                             data.tasks[state.selected_task_index].text = text;
